@@ -65,6 +65,7 @@ class InteractiveCycles : public CyclesEngine {
   void *ptr_hRC = nullptr;
   bool mFrameFinished;
   void *mOpenGLContextLockPtr = nullptr;
+  bool mOpenGLContextLocked = false;
   InteractiveCyclesOpenGLDisplayDriver *mDriverPtr;
 
   // Mouse data

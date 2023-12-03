@@ -168,13 +168,23 @@ ACQUIRE_LOCK bool InteractiveCycles::EnableContextOpenGL()
   HGLRC hRC = (HGLRC)ptr_hRC;
 
   bool isOk = wglMakeCurrent(hDC, hRC);
+  if (!isOk) {
+    mOpenGLContextLocked = false;
+    ((std::mutex *)mOpenGLContextLockPtr)->unlock();
+  }
+  else {
+    mOpenGLContextLocked = true;
+  }
   return isOk;
 }
 
 RELEASE_LOCK bool InteractiveCycles::DisableContextOpenGL()
 {
   bool isOk = wglMakeCurrent(NULL, NULL);
-  ((std::mutex *)mOpenGLContextLockPtr)->unlock();
+  if (mOpenGLContextLocked) {
+    mOpenGLContextLocked = false;
+    ((std::mutex *)mOpenGLContextLockPtr)->unlock();
+  }
   return isOk;
 }
 
