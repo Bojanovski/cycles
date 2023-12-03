@@ -119,6 +119,8 @@ if(WITH_CYCLES_STANDALONE)
   add_library(cycles SHARED ${SRC} ${INC} ${INC_SYS})
   unset(SRC)
   
+  target_compile_features(cycles PUBLIC cxx_std_17)
+  
   target_link_libraries(cycles PUBLIC ${LIB})
 
   if(APPLE)
