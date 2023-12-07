@@ -52,45 +52,39 @@ class InteractiveCyclesOpenGLDisplayDriver : public OpenGLDisplayDriver {
 
   virtual void draw(const Params &params) override
   {
-    if (mInteractiveCycles->UseOuterContext()) {
-
-      /* See do_update_begin() for why no locking is required here. */
-      if (texture_.need_clear) {
-        /* Texture is requested to be cleared and was not yet cleared.
-         * Do early return which should be equivalent of drawing all-zero texture. */
-        return;
-      }
-
-      if (!gl_draw_resources_ensure()) {
-        return;
-      }
-
-      DisplayDriverDelegateParams dddp;
-      dddp.gl_upload_sync_ = gl_upload_sync_;
-      dddp.useNearestPointSampling = (texture_.width != params.size.x ||
-                                      texture_.height != params.size.y);
-      dddp.texId = texture_.gl_id;
-      dddp.vertexBufferId = vertex_buffer_;
-      mInteractiveCycles->DrawWithOuterContext_DisplayDriverDelegate(0, &dddp);
-      display_shader_.bind(params.full_size.x, params.full_size.y);
-      mInteractiveCycles->DrawWithOuterContext_DisplayDriverDelegate(1, &dddp);
-      texture_update_if_needed();
-      Params pTemp = params;
-      // Account for the difference in coordinate systems
-      pTemp.size.x = -params.size.x;
-      pTemp.full_size.x = -params.full_size.x;
-      pTemp.full_offset.x = params.full_size.x;
-      vertex_buffer_update(pTemp);
-      dddp.texcoordAttribute = display_shader_.get_tex_coord_attrib_location();
-      dddp.positionAttribute = display_shader_.get_position_attrib_location();
-      mInteractiveCycles->DrawWithOuterContext_DisplayDriverDelegate(2, &dddp);
-      display_shader_.unbind();
-      mInteractiveCycles->DrawWithOuterContext_DisplayDriverDelegate(3, &dddp);
-      gl_render_sync_ = dddp.gl_render_sync_;
+    /* See do_update_begin() for why no locking is required here. */
+    if (texture_.need_clear) {
+      /* Texture is requested to be cleared and was not yet cleared.
+       * Do early return which should be equivalent of drawing all-zero texture. */
+      return;
     }
-    else {
-      OpenGLDisplayDriver::draw(params);
+
+    if (!gl_draw_resources_ensure()) {
+      return;
     }
+
+    DisplayDriverDelegateParams dddp;
+    dddp.gl_upload_sync_ = gl_upload_sync_;
+    dddp.useNearestPointSampling = (texture_.width != params.size.x ||
+                                    texture_.height != params.size.y);
+    dddp.texId = texture_.gl_id;
+    dddp.vertexBufferId = vertex_buffer_;
+    mInteractiveCycles->DrawStage_DisplayDriverDelegate(0, &dddp);
+    display_shader_.bind(params.full_size.x, params.full_size.y);
+    mInteractiveCycles->DrawStage_DisplayDriverDelegate(1, &dddp);
+    texture_update_if_needed();
+    Params pTemp = params;
+    // Account for the difference in coordinate systems
+    pTemp.size.x = -params.size.x;
+    pTemp.full_size.x = -params.full_size.x;
+    pTemp.full_offset.x = params.full_size.x;
+    vertex_buffer_update(pTemp);
+    dddp.texcoordAttribute = display_shader_.get_tex_coord_attrib_location();
+    dddp.positionAttribute = display_shader_.get_position_attrib_location();
+    mInteractiveCycles->DrawStage_DisplayDriverDelegate(2, &dddp);
+    display_shader_.unbind();
+    mInteractiveCycles->DrawStage_DisplayDriverDelegate(3, &dddp);
+    gl_render_sync_ = dddp.gl_render_sync_;
   }
 
  private:

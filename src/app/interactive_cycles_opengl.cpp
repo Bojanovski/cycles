@@ -95,7 +95,7 @@ bool InteractiveCycles::DeinitializeOpenGL()
 //  DisableContextOpenGL();
 //}
 
-void InteractiveCycles::DrawWithOuterContext_DisplayDriverDelegate(
+void InteractiveCycles::DrawStage_DisplayDriverDelegate(
     int stage, DisplayDriverDelegateParams *params)
 {
   switch (stage) {

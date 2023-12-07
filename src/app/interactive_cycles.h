@@ -48,8 +48,8 @@ class InteractiveCycles : public CyclesEngine {
   virtual void ResetSession() override;
   void SessionPrintStatus();
 
-  void DrawWithOuterContext_DisplayDriverDelegate(int stage, DisplayDriverDelegateParams *params);
-  bool UseOuterContext()
+  void DrawStage_DisplayDriverDelegate(int stage, DisplayDriverDelegateParams *params);
+  bool UseOuterContext() const
   {
     return mUseOuterContext;
   }

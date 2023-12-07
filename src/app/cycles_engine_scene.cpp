@@ -240,18 +240,6 @@ void CyclesEngine::CleanScene(Scene *scene)
       ++nodeVectorIte;
     }
   }
-
-  // Remove all deleted nodes from the dictionary
-  auto nodeMapIte = std::begin(mQiIDToNode);
-  while (nodeMapIte != std::end(mQiIDToNode)) {
-    if (transformsToKeep.find(nodeMapIte->second->transform.get()) == transformsToKeep.end()) {
-      nodeMapIte = mQiIDToNode.erase(nodeMapIte);
-    }
-    else  // keep
-    {
-      ++nodeMapIte;
-    }
-  }
 }
 
 void CyclesEngine::ClearScene(Scene *scene)
@@ -387,7 +375,6 @@ void QuatToAxisAngle(ccl::float4 q, ccl::float3 *axis, float *angle)
 Node *CyclesEngine::AddNode(Scene *scene,
                             const std::string &name,
                             Node *parent,
-                            QiObjectID qiId,
                             float t[3],
                             float r[4],
                             float s[3])
@@ -416,19 +403,7 @@ Node *CyclesEngine::AddNode(Scene *scene,
   memcpy_s(node->t, sizeof(float) * 3, t, sizeof(float) * 3);
   memcpy_s(node->s, sizeof(float) * 3, s, sizeof(float) * 3);
   memcpy_s(node->r, sizeof(float) * 4, r, sizeof(float) * 4);
-
-  mQiIDToNode[qiId] = node;
   return node;
-}
-
-Node *CyclesEngine::GetNode(QiObjectID qiId)
-{
-  if (mQiIDToNode.find(qiId) == mQiIDToNode.end()) {
-    return nullptr;
-  }
-  else {
-    return mQiIDToNode[qiId];
-  }
 }
 
 void CyclesEngine::RemoveNode(Node *node)
@@ -608,7 +583,7 @@ Material *CyclesEngine::AddMaterial(Scene *scene,
                                     const char *name,
                                     Texture *albedoTex,
                                     const TextureTransform &albedoTransform,
-                                    float *albedoColor,
+                                    const float *albedoColor,
                                     Texture *metallicRoughnessTexture,
                                     const TextureTransform &metallicRoughnessTransform,
                                     float metallicFactor,
@@ -618,11 +593,11 @@ Material *CyclesEngine::AddMaterial(Scene *scene,
                                     float normalStrength,
                                     Texture *emissiveTex,
                                     const TextureTransform &emissiveTransform,
-                                    float *emissiveFactor,
+                                    const float *emissiveFactor,
                                     float emissiveStrength,
                                     float transmissionFactor,
                                     float IOR,
-                                    float *volumeAttenuationColor,
+                                    const float *volumeAttenuationColor,
                                     float volumeThicknessFactor,
                                     float volumeAttenuationDistance)
 {
@@ -930,12 +905,11 @@ Material *CyclesEngine::AddMaterial(Scene *scene,
 Mesh *CyclesEngine::AddMesh(Scene *scene,
                             const char *name,
                             Material **materials,
-                            float *vertexPosArray,
-                            float *vertexNormalArray,
-                            float *vertexUVArray,
-                            uint vertexCount,
-                            uint *indices,
-                            uint *triangleCounts,
+                            Mesh::Buffer *vertexPosition,
+                            Mesh::Buffer *vertexNormal,
+                            Mesh::Buffer *vertexUV,
+                            Mesh::Buffer *vertexTangent,
+                            Mesh::Buffer *indices,
                             uint submeshCount)
 {
   // Create mesh
@@ -943,52 +917,87 @@ Mesh *CyclesEngine::AddMesh(Scene *scene,
   ccl::Mesh *mesh = new ccl::Mesh();  // cycles should take care of deleting this object
   s->geometry.push_back(mesh);
 
+  size_t totalVeretexCount = 0;
   size_t totalTriangleCount = 0;
+  std::vector<size_t> triangleCounts(submeshCount);
   for (size_t i = 0; i < submeshCount; i++) {
+    totalVeretexCount += vertexPosition[i].count;
+    triangleCounts[i] = indices[i].count / 3;
     totalTriangleCount += triangleCounts[i];
   }
 
   // Set mesh properties
   mesh->name = name;
-  mesh->reserve_mesh(vertexCount, totalTriangleCount);
+  mesh->reserve_mesh(totalVeretexCount, totalTriangleCount);
   mesh->set_subdivision_type(ccl::Mesh::SUBDIVISION_LINEAR);
 
   // Set vertices
   ccl::array<ccl::float3> P_array;
-  P_array.resize(vertexCount);
-  for (size_t i = 0; i < vertexCount; i++) {
-    P_array[i] = ccl::make_float3(
-        vertexPosArray[i * 3 + 0], vertexPosArray[i * 3 + 1], vertexPosArray[i * 3 + 2]);
+  P_array.resize(totalVeretexCount);
+  size_t currentVertex = 0;
+  for (size_t i = 0; i < submeshCount; i++) {
+    for (uint j = 0; j < vertexPosition[i].count; j++) {
+      auto data = (const float *)(vertexPosition[i].data +
+                                               vertexPosition[i].stride * j);
+      P_array[currentVertex] = ccl::make_float3(data[0], data[1], data[2]);
+      currentVertex++;
+    }
   }
   mesh->set_verts(P_array);
 
   // Create submeshes
-  size_t currentStartingTriangleIndex = 0;
+  uint indexOffset = 0;
   for (size_t i = 0; i < submeshCount; i++) {
+    int stride = indices[i].stride;
+    uint componentType = indices[i].componentType;
     // Create triangles
     for (size_t j = 0; j < triangleCounts[i]; j++) {
+        size_t pos = stride * 3 * j;
+        int i0 = -1, i1 = -1, i2 = -1;
+        switch (componentType) {
+        case COMPONENT_TYPE_INT:
+          i0 = *(int *)(indices[i].data + pos + 0 * stride);
+          i1 = *(int *)(indices[i].data + pos + 1 * stride);
+          i2 = *(int *)(indices[i].data + pos + 2 * stride);
+          break;
+        case COMPONENT_TYPE_UNSIGNED_INT:
+          i0 = *(uint *)(indices[i].data + pos + 0 * stride);
+          i1 = *(uint *)(indices[i].data + pos + 1 * stride);
+          i2 = *(uint *)(indices[i].data + pos + 2 * stride);
+          break;
+        case COMPONENT_TYPE_SHORT:
+          i0 = *(short *)(indices[i].data + pos + 0 * stride);
+          i1 = *(short *)(indices[i].data + pos + 1 * stride);
+          i2 = *(short *)(indices[i].data + pos + 2 * stride);
+          break;
+        case COMPONENT_TYPE_UNSIGNED_SHORT:
+          i0 = *(ushort *)(indices[i].data + pos + 0 * stride);
+          i1 = *(ushort *)(indices[i].data + pos + 1 * stride);
+          i2 = *(ushort *)(indices[i].data + pos + 2 * stride);
+          break;
+        default:
+          throw;
+        }
 
-      int v0 = (currentStartingTriangleIndex + j) * 3 + 0;
-      int v1 = (currentStartingTriangleIndex + j) * 3 + 1;
-      int v2 = (currentStartingTriangleIndex + j) * 3 + 2;
-      mesh->add_triangle((int)indices[v0], (int)indices[v1], (int)indices[v2], i, true);
+      mesh->add_triangle(indexOffset + i0, indexOffset + i1, indexOffset + i2, i, true);
     }
-    currentStartingTriangleIndex += triangleCounts[i];
+    indexOffset += vertexPosition[i].count;
   }
 
   // Set normals, first face normals
   mesh->add_face_normals();
   // Then either set or compute vertex normals
   ccl::float3 *fdataNormal = nullptr;
-  if (vertexNormalArray != nullptr) {
+  if (vertexNormal != nullptr) {
     ccl::Attribute *nAttr = mesh->attributes.add(ccl::ATTR_STD_VERTEX_NORMAL);
-    fdataNormal = nAttr->data_float3();
-
-    for (size_t i = 0; i < vertexCount; i++) {
-      fdataNormal[i] = ccl::make_float3(vertexNormalArray[i * 3 + 0],
-                                        vertexNormalArray[i * 3 + 1],
-                                        vertexNormalArray[i * 3 + 2]);
-      //fdataNormal[i] = ccl::normalize(fdataNormal[i]);
+    fdataNormal = nAttr->data_float3();    
+    currentVertex = 0;
+    for (size_t i = 0; i < submeshCount; i++) {
+      for (uint j = 0; j < vertexNormal[i].count; j++) {
+        auto data = (const float *)(vertexNormal[i].data + vertexNormal[i].stride * j);
+        fdataNormal[currentVertex] = ccl::make_float3(data[0], data[1], data[2]);
+        currentVertex++;
+      }
     }
   }
   else {
@@ -996,96 +1005,78 @@ Mesh *CyclesEngine::AddMesh(Scene *scene,
     ccl::Attribute *nAttr = mesh->attributes.find(ccl::ATTR_STD_VERTEX_NORMAL);
     fdataNormal = nAttr->data_float3();
   }
-
+  
   // Set UVs
   ccl::float2 *fdataUV = nullptr;
-  if (vertexUVArray != nullptr) {
+  if (vertexUV != nullptr) {
     ccl::Attribute *uvAttr = mesh->attributes.add(ccl::ATTR_STD_UV);
     fdataUV = uvAttr->data_float2();
-
+  
     // Loop over triangles
-    size_t currentStartingTriangleIndex = 0;
+    indexOffset = 0;
+    size_t triangleOffset = 0;
     for (size_t i = 0; i < submeshCount; i++) {
+      int stride = vertexUV[i].stride;
       for (size_t j = 0; j < triangleCounts[i]; j++) {
-        int j0 = (currentStartingTriangleIndex + j) * 3 + 0;
-        int j1 = (currentStartingTriangleIndex + j) * 3 + 1;
-        int j2 = (currentStartingTriangleIndex + j) * 3 + 2;
-        int i0 = indices[j0];
-        int i1 = indices[j1];
-        int i2 = indices[j2];
 
-        fdataUV[j0] = ccl::make_float2(vertexUVArray[i0 * 2 + 0],
-                                       1.0f - vertexUVArray[i0 * 2 + 1]);
-        fdataUV[j1] = ccl::make_float2(vertexUVArray[i1 * 2 + 0],
-                                       1.0f - vertexUVArray[i1 * 2 + 1]);
-        fdataUV[j2] = ccl::make_float2(vertexUVArray[i2 * 2 + 0],
-                                       1.0f - vertexUVArray[i2 * 2 + 1]);
+        auto t = mesh->get_triangle(triangleOffset + j);
+        int i0 = t.v[0] - indexOffset;
+        int i1 = t.v[1] - indexOffset;
+        int i2 = t.v[2] - indexOffset;
+
+        int j0 = (triangleOffset + j) * 3 + 0;
+        int j1 = (triangleOffset + j) * 3 + 1;
+        int j2 = (triangleOffset + j) * 3 + 2;
+
+        auto d0 = (const float *)(vertexUV[i].data + stride * i0);
+        auto d1 = (const float *)(vertexUV[i].data + stride * i1);
+        auto d2 = (const float *)(vertexUV[i].data + stride * i2);
+
+        fdataUV[j0] = ccl::make_float2(d0[0], 1.0f - d0[1]);
+        fdataUV[j1] = ccl::make_float2(d1[0], 1.0f - d1[1]);
+        fdataUV[j2] = ccl::make_float2(d2[0], 1.0f - d2[1]);
       }
-      currentStartingTriangleIndex += triangleCounts[i];
+      triangleOffset += triangleCounts[i];
+      indexOffset += vertexUV[i].count;
     }
   }
-
+  
   // Set Tangents
-  bool setTangents = (fdataNormal != nullptr) && (fdataUV != nullptr);
-  if (setTangents) {
+  if (vertexTangent != nullptr) {
     ccl::Attribute *attrTangent = mesh->attributes.add(ccl::ATTR_STD_UV_TANGENT);
     ccl::Attribute *attrTangentSign = mesh->attributes.add(ccl::ATTR_STD_UV_TANGENT_SIGN);
     ccl::float3 *fdataTangent = attrTangent->data_float3();
     float *fdataTangentSign = attrTangentSign->data_float();
     ccl::array<ccl::float3> &vertices = mesh->get_verts();
 
-    size_t currentStartingTriangleIndex = 0;
+    indexOffset = 0;
+    size_t triangleOffset = 0;
     for (size_t i = 0; i < submeshCount; i++) {
+      int stride = vertexTangent[i].stride;
       for (long j = 0; j < triangleCounts[i]; j++) {
-        int j0 = (currentStartingTriangleIndex + j) * 3 + 0;
-        int j1 = (currentStartingTriangleIndex + j) * 3 + 1;
-        int j2 = (currentStartingTriangleIndex + j) * 3 + 2;
 
-        int i0 = indices[j0];
-        int i1 = indices[j1];
-        int i2 = indices[j2];
+        auto t = mesh->get_triangle(triangleOffset + j);
+        int i0 = t.v[0] - indexOffset;
+        int i1 = t.v[1] - indexOffset;
+        int i2 = t.v[2] - indexOffset;
 
-        const ccl::float3 &v1 = vertices[i0];
-        const ccl::float3 &v2 = vertices[i1];
-        const ccl::float3 &v3 = vertices[i2];
+        int j0 = (triangleOffset + j) * 3 + 0;
+        int j1 = (triangleOffset + j) * 3 + 1;
+        int j2 = (triangleOffset + j) * 3 + 2;
 
-        const ccl::float2 &w1 = fdataUV[j0];
-        const ccl::float2 &w2 = fdataUV[j1];
-        const ccl::float2 &w3 = fdataUV[j2];
+        auto d0 = (const float *)(vertexTangent[i].data + stride * i0);
+        auto d1 = (const float *)(vertexTangent[i].data + stride * i1);
+        auto d2 = (const float *)(vertexTangent[i].data + stride * i2);
 
-        const ccl::float3 &n1 = fdataNormal[i0];
-        const ccl::float3 &n2 = fdataNormal[i1];
-        const ccl::float3 &n3 = fdataNormal[i2];
-
-        float x1 = v2.x - v1.x;
-        float x2 = v3.x - v1.x;
-        float y1 = v2.y - v1.y;
-        float y2 = v3.y - v1.y;
-        float z1 = v2.z - v1.z;
-        float z2 = v3.z - v1.z;
-
-        float s1 = w2.x - w1.x;
-        float s2 = w3.x - w1.x;
-        float t1 = w2.y - w1.y;
-        float t2 = w3.y - w1.y;
-
-        float r = 1.0F / (s1 * t2 - s2 * t1);
-        ccl::float3 sdir = ccl::make_float3((t2 * x1 - t1 * x2) * r, (t2 * y1 - t1 * y2) * r, (t2 * z1 - t1 * z2) * r);
-        ccl::float3 tdir = ccl::make_float3((s1 * x2 - s2 * x1) * r, (s1 * y2 - s2 * y1) * r, (s1 * z2 - s2 * z1) * r);
-        ccl::float3 tan = sdir;
-        ccl::float3 bitan = tdir;
-        
-        // Gram-Schmidt orthogonalize
-        fdataTangent[j0] = ccl::normalize(tan - n1 * ccl::dot(n1, tan));
-        fdataTangent[j1] = ccl::normalize(tan - n2 * ccl::dot(n2, tan));
-        fdataTangent[j2] = ccl::normalize(tan - n3 * ccl::dot(n3, tan));
-
-        // Calculate handedness
-        fdataTangentSign[j0] = (ccl::dot(ccl::cross(n1, tan), bitan) < 0.0F) ? -1.0F : 1.0F;
-        fdataTangentSign[j1] = (ccl::dot(ccl::cross(n2, tan), bitan) < 0.0F) ? -1.0F : 1.0F;
-        fdataTangentSign[j2] = (ccl::dot(ccl::cross(n3, tan), bitan) < 0.0F) ? -1.0F : 1.0F;
+        fdataTangent[j0] = ccl::make_float3(d0[0], d0[1], d0[2]);
+        fdataTangent[j1] = ccl::make_float3(d1[0], d1[1], d1[2]);
+        fdataTangent[j2] = ccl::make_float3(d2[0], d2[1], d2[2]);
+        fdataTangentSign[j0] = d0[3];
+        fdataTangentSign[j1] = d1[3];
+        fdataTangentSign[j2] = d2[3];
       }
-      currentStartingTriangleIndex += triangleCounts[i];
+      triangleOffset += triangleCounts[i];
+      indexOffset += vertexTangent[i].count;
     }
   }
 

@@ -22,6 +22,10 @@
 #define PI_2_F (PI_F / 2.0f)
 #define PI_4_F (PI_F / 4.0f)
 
+#define COMPONENT_TYPE_SHORT (5122)
+#define COMPONENT_TYPE_UNSIGNED_SHORT (5123)
+#define COMPONENT_TYPE_INT (5124)
+#define COMPONENT_TYPE_UNSIGNED_INT (5125)
 
 namespace ccl {
 
@@ -42,8 +46,9 @@ class Light;
 
 namespace cycles_wrapper {
 
-typedef unsigned long long QiObjectID;
 typedef unsigned int uint;
+typedef unsigned short ushort;
+typedef unsigned char uchar;
 
 struct Texture {};
 struct TextureTransform {
@@ -51,7 +56,15 @@ struct TextureTransform {
   float rotation;
   float scale[2];
 };
-struct Mesh {};
+struct Mesh {
+  struct Buffer {
+    const uchar *data = nullptr;
+    uint count;
+    int stride;
+    int componentSize;
+    uint componentType;
+  };
+};
 struct Light {};
 struct Scene {};
 struct Node {
@@ -121,11 +134,9 @@ class CyclesEngine {
   DLL_API Node *AddNode(Scene *scene,
                         const std::string &name,
                         Node *parent,
-                        QiObjectID qiId,
                         float t[3],
                         float r[4],
                         float s[3]);
-  DLL_API Node *GetNode(QiObjectID qiId);
   DLL_API void RemoveNode(Node *node);
   DLL_API void UpdateNodeTransform(Node *node, float t[3], float r[4], float s[3]);
   DLL_API void UpdateNodeVisibility(Node *node, bool visible);
@@ -139,7 +150,7 @@ class CyclesEngine {
                                 const char *name,
                                 Texture *albedoTex,
                                 const TextureTransform &albedoTransform,
-                                float *albedoColor,
+                                const float *albedoColor,
                                 Texture *metallicRoughnessTexture,
                                 const TextureTransform &metallicRoughnessTransform,
                                 float metallicFactor,
@@ -149,22 +160,21 @@ class CyclesEngine {
                                 float normalStrength,
                                 Texture *emissiveTex,
                                 const TextureTransform &emissiveTransform,
-                                float *emissiveFactor,
+                                const float *emissiveFactor,
                                 float emissiveStrength,
                                 float transmissionFactor,
                                 float IOR,
-                                float *volumeAttenuationColor,
+                                const float *volumeAttenuationColor,
                                 float volumeThicknessFactor,
                                 float volumeAttenuationDistance);
   DLL_API Mesh *AddMesh(Scene *scene,
                         const char *name,
                         Material **materials,
-                        float *vertexPosArray,
-                        float *vertexNormalArray,
-                        float *vertexUVArray,
-                        uint vertexCount,
-                        uint *indices,
-                        uint *triangleCounts,
+                        Mesh::Buffer *vertexPosition,
+                        Mesh::Buffer *vertexNormal,
+                        Mesh::Buffer *vertexUV,
+                        Mesh::Buffer *vertexTangent,
+                        Mesh::Buffer *indices,
                         uint submeshCount);
   DLL_API void UpdateMeshMaterials(Scene *scene,
                                    Mesh *mesh,
@@ -204,7 +214,6 @@ class CyclesEngine {
   // Scene structures
   std::vector<std::unique_ptr<Node>> mNodes;
   std::vector<std::unique_ptr<Material>> mMaterials;
-  std::map<QiObjectID, Node *> mQiIDToNode;
   std::map<std::string, ccl::Shader *> mNameToShader;
 
   // Static const
