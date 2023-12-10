@@ -375,9 +375,9 @@ void QuatToAxisAngle(ccl::float4 q, ccl::float3 *axis, float *angle)
 Node *CyclesEngine::AddNode(Scene *scene,
                             const std::string &name,
                             Node *parent,
-                            float t[3],
-                            float r[4],
-                            float s[3])
+                            const float t[3],
+                            const float r[4],
+                            const float s[3])
 {
   mNodes.push_back(std::make_unique<Node>());
   Node *node = mNodes.back().get();
@@ -1083,6 +1083,91 @@ Mesh *CyclesEngine::AddMesh(Scene *scene,
   // Set shaders
   ccl::array<ccl::Node *> used_shaders;  // = mesh->get_used_shaders();
   for (size_t i = 0; i < submeshCount; i++) {
+    ccl::Shader *shader = materials[i] ? (ccl::Shader *)materials[i]->pbrShader :
+                                         mNameToShader[sDefaultSurfaceShaderName];
+    used_shaders.push_back_slow(shader);
+  }
+  mesh->set_used_shaders(used_shaders);
+  mesh->tag_update(s, false);
+
+  return (cycles_wrapper::Mesh *)mesh;
+}
+
+Mesh *CyclesEngine::CopyMesh(Scene *scene, Material **materials, Mesh *src)
+{
+  // Create mesh
+  ccl::Scene *s = (ccl::Scene *)scene;
+  ccl::Mesh *mesh = new ccl::Mesh();  // cycles should take care of deleting this object
+  s->geometry.push_back(mesh);
+
+  auto srcMesh = (ccl::Mesh*)src;
+  mesh->name = srcMesh->name;
+
+  // Position
+  ccl::array<ccl::float3> P_array = srcMesh->get_verts();
+  auto totalVertexCount = P_array.size();
+  mesh->reserve_mesh(totalVertexCount, srcMesh->num_triangles());
+  mesh->set_subdivision_type(srcMesh->get_subdivision_type());
+  mesh->set_verts(P_array);
+
+  // Triangle
+  int shaderCount = 0;
+  for (size_t i = 0; i < srcMesh->num_triangles(); i++) {
+    auto t = srcMesh->get_triangle(i);
+    auto shader = srcMesh->get_shader()[i];
+    auto smooth = srcMesh->get_smooth()[i];
+    mesh->add_triangle(t.v[0], t.v[1], t.v[2], shader, smooth);
+    shaderCount = std::max(shaderCount, shader + 1);
+  }
+
+  // Normal
+  mesh->add_face_normals();
+  ccl::Attribute *nAttr = mesh->attributes.add(ccl::ATTR_STD_VERTEX_NORMAL);
+  ccl::float3 *fdataNormal = nAttr->data_float3();
+  auto srcAttr = srcMesh->attributes.find(ccl::ATTR_STD_VERTEX_NORMAL);
+  ccl::float3 *fsrcNormal = srcAttr->data_float3();
+  for (size_t i = 0; i < totalVertexCount; i++) {
+    fdataNormal[i] = fsrcNormal[i];
+  }
+  
+  // UV
+  ccl::Attribute *uvAttr = mesh->attributes.add(ccl::ATTR_STD_UV);
+  ccl::float2 *fdataUV = uvAttr->data_float2();
+  srcAttr = srcMesh->attributes.find(ccl::ATTR_STD_UV);
+  ccl::float2 *fsrcUV = srcAttr->data_float2();
+  for (size_t i = 0; i < srcMesh->num_triangles(); i++) {
+    int j0 = i * 3 + 0;
+    int j1 = i * 3 + 1;
+    int j2 = i * 3 + 2;
+    fdataUV[j0] = fsrcUV[j0];
+    fdataUV[j1] = fsrcUV[j1];
+    fdataUV[j2] = fsrcUV[j2];
+  }
+
+  // Tangent
+  ccl::Attribute *attrTangent = mesh->attributes.add(ccl::ATTR_STD_UV_TANGENT);
+  ccl::Attribute *attrTangentSign = mesh->attributes.add(ccl::ATTR_STD_UV_TANGENT_SIGN);
+  ccl::float3 *fdataTangent = attrTangent->data_float3();
+  float *fdataTangentSign = attrTangentSign->data_float();
+  srcAttr = srcMesh->attributes.find(ccl::ATTR_STD_UV_TANGENT);
+  ccl::float3 *fsrcTangent = srcAttr->data_float3();
+  srcAttr = srcMesh->attributes.find(ccl::ATTR_STD_UV_TANGENT_SIGN);
+  float *fsrcTangentSign = srcAttr->data_float();
+  for (size_t i = 0; i < srcMesh->num_triangles(); i++) {
+    int j0 = i * 3 + 0;
+    int j1 = i * 3 + 1;
+    int j2 = i * 3 + 2;
+    fdataTangent[j0] = fsrcTangent[j0];
+    fdataTangent[j1] = fsrcTangent[j1];
+    fdataTangent[j2] = fsrcTangent[j2];
+    fdataTangentSign[j0] = fsrcTangentSign[j0];
+    fdataTangentSign[j1] = fsrcTangentSign[j1];
+    fdataTangentSign[j2] = fsrcTangentSign[j2];
+  }
+
+  // Set shaders
+  ccl::array<ccl::Node *> used_shaders;  // = mesh->get_used_shaders();
+  for (size_t i = 0; i < shaderCount; i++) {
     ccl::Shader *shader = materials[i] ? (ccl::Shader *)materials[i]->pbrShader :
                                          mNameToShader[sDefaultSurfaceShaderName];
     used_shaders.push_back_slow(shader);

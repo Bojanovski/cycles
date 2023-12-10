@@ -134,9 +134,9 @@ class CyclesEngine {
   DLL_API Node *AddNode(Scene *scene,
                         const std::string &name,
                         Node *parent,
-                        float t[3],
-                        float r[4],
-                        float s[3]);
+                        const float t[3],
+                        const float r[4],
+                        const float s[3]);
   DLL_API void RemoveNode(Node *node);
   DLL_API void UpdateNodeTransform(Node *node, float t[3], float r[4], float s[3]);
   DLL_API void UpdateNodeVisibility(Node *node, bool visible);
@@ -176,6 +176,7 @@ class CyclesEngine {
                         Mesh::Buffer *vertexTangent,
                         Mesh::Buffer *indices,
                         uint submeshCount);
+  DLL_API Mesh *CopyMesh(Scene *scene, Material **materials, Mesh *src);
   DLL_API void UpdateMeshMaterials(Scene *scene,
                                    Mesh *mesh,
                                    Material **materials,
